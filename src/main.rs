@@ -49,6 +49,8 @@ async fn main() -> io::Result<()> {
         return gpg_bridge::bridge(from, to).await;
     }
 
+    let _ = gpg_bridge::ping_gpg_agent().await;
+
     let mut cmd = Command::new(program);
     cmd.arg(from);
     if let Some(t) = to {

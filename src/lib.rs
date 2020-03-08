@@ -32,21 +32,26 @@ async fn load_gpg_extra_socket_path() -> io::Result<String> {
     Ok(String::from_utf8(output.stdout).unwrap().trim().to_owned())
 }
 
+pub async fn ping_gpg_agent() -> io::Result<()> {
+    let output = Command::new("gpg-connect-agent")
+        .arg("/bye")
+        .output()
+        .await?;
+    if !output.status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "failed to start gpg-agent: {:?}",
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        ));
+    }
+    Ok(())
+}
+
 async fn load_port_nounce(path: &str) -> io::Result<(u16, [u8; 16])> {
     if !Path::new(&path).exists() {
-        let output = Command::new("gpg-connect-agent")
-            .arg("/bye")
-            .output()
-            .await?;
-        if !output.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "failed to start gpg-agent: {:?}",
-                    String::from_utf8_lossy(&output.stderr)
-                ),
-            ));
-        }
+        ping_gpg_agent().await?;
     }
     let mut f = File::open(&path.replace("\\", "/")).await?;
     let mut buffer = Vec::with_capacity(50);
@@ -82,7 +87,15 @@ async fn copy(tag: &str, from: &mut ReadHalf<'_>, to: &mut WriteHalf<'_>) -> io:
 }
 
 async fn delegate(mut from: TcpStream, to_port: u16, nounce: [u8; 16]) -> io::Result<()> {
-    let mut delegate = TcpStream::connect(("127.0.0.1", to_port)).await?;
+    let mut delegate = match TcpStream::connect(("127.0.0.1", to_port)).await {
+        Ok(s) => s,
+        Err(e) => {
+            // It's possible that gpg-client was killed and leave stale meta untouched.
+            // Reping agent to make it startup.
+            let _ = ping_gpg_agent().await;
+            return Err(e);
+        }
+    };
     delegate.write_all(&nounce).await?;
     delegate.flush().await?;
 
@@ -102,6 +115,8 @@ async fn delegate(mut from: TcpStream, to_port: u16, nounce: [u8; 16]) -> io::Re
 ///
 /// `to_path` should point to the path of gnupg UDS.
 pub async fn bridge(from_addr: String, to_path: Option<String>) -> io::Result<()> {
+    // Attempt to setup gpg-agent if it's not up yet.
+    let _ = ping_gpg_agent().await;
     let mut listener = TcpListener::bind(&from_addr).await?;
 
     let meta = Arc::new(Mutex::new(AgentMeta {
