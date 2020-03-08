@@ -1,8 +1,10 @@
-use gnupg_bridge::Bridge;
+use gpg_bridge::Bridge;
 use std::{env, io};
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    pretty_env_logger::init();
+
     let mut args = env::args();
     let program = args.next().unwrap();
     let from = args.next().unwrap_or_else(|| "--help".to_owned());
