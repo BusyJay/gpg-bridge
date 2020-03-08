@@ -1,4 +1,3 @@
-use gpg_bridge::Bridge;
 use std::{env, io};
 
 #[tokio::main]
@@ -10,11 +9,8 @@ async fn main() -> io::Result<()> {
     let from = args.next().unwrap_or_else(|| "--help".to_owned());
     if from == "--help" || from == "-h" {
         println!("Usage: {} from-addr [path-to-gpg-extra-socket]", program);
-        return Ok(())
+        return Ok(());
     }
-    let to = args.next().unwrap_or_else(|| {
-        let home = env::var("userprofile").unwrap();
-        format!("{}/AppData/Roaming/gnupg/S.gpg-agent.extra", home)
-    });
-    Bridge::bridge(from, to)?.serve().await
+    let to = args.next();
+    gpg_bridge::bridge(from, to).await
 }
