@@ -2,7 +2,7 @@ use log::{debug, error, trace};
 use std::net::Shutdown;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::{io, ptr, str};
+use std::{error, io, mem, ptr, str};
 use tokio::fs::File;
 use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
@@ -14,10 +14,25 @@ struct AgentMeta {
     args: Option<(u16, [u8; 16])>,
 }
 
-async fn load_gpg_extra_socket_path() -> io::Result<String> {
+#[derive(Clone, Copy)]
+pub enum SocketType {
+    Ssh,
+    Extra,
+}
+
+impl SocketType {
+    fn name(&self) -> &'static str {
+        match self {
+            SocketType::Ssh => "agent-ssh-socket",
+            SocketType::Extra => "agent-extra-socket",
+        }
+    }
+}
+
+async fn load_gpg_socket_path(ty: SocketType) -> io::Result<String> {
     let output = Command::new("gpgconf")
         .arg("--list-dir")
-        .arg("agent-extra-socket")
+        .arg(ty.name())
         .output()
         .await?;
     if !output.status.success() {
@@ -49,6 +64,57 @@ pub async fn ping_gpg_agent() -> io::Result<()> {
     Ok(())
 }
 
+fn report_data_err(e: impl Into<Box<dyn error::Error + Send + Sync>>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, e)
+}
+
+fn load_cygwin_port_nounce(buffer: &[u8]) -> io::Result<(u16, [u8; 16])> {
+    // "%u %c %08x-%08x-%08x-%08x\x00"
+    let find = |buffer: &[u8], start_pos: usize, delimeter| {
+        if buffer.len() <= start_pos {
+            return Err(report_data_err("buffer to short"));
+        }
+        match buffer[start_pos..].iter().position(|c| *c == delimeter) {
+            Some(pos) => Ok(pos),
+            None => Err(report_data_err("wrong data format")),
+        }
+    };
+    let parse = |buffer: &[u8], radix: u32| match str::from_utf8(buffer) {
+        Ok(s) => match u32::from_str_radix(s, radix) {
+            Ok(v) => Ok(v),
+            Err(e) => Err(report_data_err(e)),
+        },
+        Err(e) => Err(report_data_err(e)),
+    };
+
+    let end_pos = find(&buffer, 0, b' ')?;
+    let port = parse(&buffer[..end_pos], 10)?;
+
+    if port < 1
+        || port > 65535
+        || !buffer[end_pos..].starts_with(b" s ")
+        || buffer.len() < end_pos + 3 + 35 + 1
+    {
+        return Err(report_data_err("wrong data format"));
+    }
+
+    let mut start_pos = end_pos + 3;
+    let mut nounce = [0u32; 4];
+    for pos in 0..4 {
+        nounce[pos] = parse(&buffer[start_pos..start_pos + 4], 16)?;
+        if pos < 3 {
+            if buffer[start_pos + 4] != b'-' {
+                return Err(report_data_err("wrong data format"));
+            }
+        } else if buffer[start_pos + 4] != b'x' {
+            return Err(report_data_err("wrong data format"));
+        }
+        start_pos += 5;
+    }
+    // It's on purpose to ignore endianess.
+    Ok((port as u16, unsafe { mem::transmute(nounce) }))
+}
+
 async fn load_port_nounce(path: &str) -> io::Result<(u16, [u8; 16])> {
     if !Path::new(&path).exists() {
         ping_gpg_agent().await?;
@@ -57,10 +123,7 @@ async fn load_port_nounce(path: &str) -> io::Result<(u16, [u8; 16])> {
     let mut buffer = Vec::with_capacity(50);
     f.read_to_end(&mut buffer).await?;
     if buffer.starts_with(b"!<socket >") {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Cygwin socket is not supported.",
-        ));
+        return load_cygwin_port_nounce(&buffer[10..]);
     }
     let (left, right) = buffer.split_at(buffer.len() - 16);
     let to_port: u16 = str::from_utf8(left).unwrap().trim().parse().unwrap();
@@ -114,7 +177,7 @@ async fn delegate(mut from: TcpStream, to_port: u16, nounce: [u8; 16]) -> io::Re
 /// A bridge that forwards all requests from certain TCP port to gpg-agent on Windows.
 ///
 /// `to_path` should point to the path of gnupg UDS.
-pub async fn bridge(from_addr: String, to_path: Option<String>) -> io::Result<()> {
+pub async fn bridge(ty: SocketType, from_addr: String, to_path: Option<String>) -> io::Result<()> {
     // Attempt to setup gpg-agent if it's not up yet.
     let _ = ping_gpg_agent().await;
     let mut listener = TcpListener::bind(&from_addr).await?;
@@ -131,7 +194,7 @@ pub async fn bridge(from_addr: String, to_path: Option<String>) -> io::Result<()
             let mut m = meta.lock().unwrap();
             if m.args.is_none() {
                 if m.path.is_none() {
-                    m.path = Some(load_gpg_extra_socket_path().await?);
+                    m.path = Some(load_gpg_socket_path(ty).await?);
                 }
                 m.args = Some(load_port_nounce(m.path.as_ref().unwrap()).await?);
             }

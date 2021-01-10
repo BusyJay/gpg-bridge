@@ -1,3 +1,4 @@
+use gpg_bridge::SocketType;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::{env, io};
@@ -46,7 +47,7 @@ async fn main() -> io::Result<()> {
         ));
     }
     if !detach {
-        return gpg_bridge::bridge(from, to).await;
+        return gpg_bridge::bridge(SocketType::Extra, from, to).await;
     }
 
     let _ = gpg_bridge::ping_gpg_agent().await;
