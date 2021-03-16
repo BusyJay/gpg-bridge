@@ -25,7 +25,10 @@ A bridge connects openssh-portable and GnuPG on Windows.
     ~/.cargo/bin/gpg-bridge 127.0.0.1:4321
     ```
 
-    If you have customized extra socket localtion, you can append the path as second parameter.
+    If you have customized extra socket location, you can append the path as second parameter.
+    
+    **NOTE**: Ensure that you listen on and forward to `127.0.0.1:<port>` as opposed to `localhost:<port>`. The latter will cause `gpg-bridge` to listen
+    on a TCPv6 socket and then `ssh.exe` will be unable to forward to it properly.
 
 Now you are all set, requests to gpg agent on remote should be able to forward to your local.
 
