@@ -9,7 +9,7 @@ fn print_help(program: &str) {
     println!("Add --detach flag to run it as a background daemon.");
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> io::Result<()> {
     pretty_env_logger::init();
 

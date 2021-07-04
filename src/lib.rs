@@ -1,12 +1,11 @@
 use log::{debug, error, trace};
-use std::net::Shutdown;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::{error, io, mem, ptr, str};
 use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::prelude::*;
 use tokio::process::Command;
 
 struct AgentMeta {
@@ -140,7 +139,7 @@ async fn copy(tag: &str, from: &mut ReadHalf<'_>, to: &mut WriteHalf<'_>) -> io:
     loop {
         let cnt = from.read(&mut buf).await?;
         if cnt == 0 {
-            to.as_ref().shutdown(Shutdown::Write)?;
+            to.shutdown().await?;
             return Ok(total);
         }
         total += cnt as u64;
@@ -180,7 +179,7 @@ async fn delegate(mut from: TcpStream, to_port: u16, nounce: [u8; 16]) -> io::Re
 pub async fn bridge(ty: SocketType, from_addr: String, to_path: Option<String>) -> io::Result<()> {
     // Attempt to setup gpg-agent if it's not up yet.
     let _ = ping_gpg_agent().await;
-    let mut listener = TcpListener::bind(&from_addr).await?;
+    let listener = TcpListener::bind(&from_addr).await?;
 
     let meta = Arc::new(Mutex::new(AgentMeta {
         path: to_path,
