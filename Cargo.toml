@@ -3,8 +3,10 @@ name = "gpg-bridge"
 version = "0.1.0"
 authors = ["Jay Lee <busyjaylee@gmail.com>"]
 edition = "2018"
+description = "A bridge connects openssh-portable and GnuPG on Windows."
 
 [dependencies]
 log = "0.4"
 tokio = { version = "1.0", features = ["net", "rt", "io-util", "macros", "process", "fs"] }
 pretty_env_logger = "0.4"
+clap = "2.0"
