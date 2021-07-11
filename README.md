@@ -22,10 +22,10 @@ A bridge connects openssh-portable and GnuPG on Windows.
 4. Build a bridge between TCP port and GnuPG extra socket.
 
     ```
-    ~/.cargo/bin/gpg-bridge 127.0.0.1:4321
+    ~/.cargo/bin/gpg-bridge --extra 127.0.0.1:4321
     ```
 
-    If you have customized extra socket localtion, you can append the path as second parameter.
+    If you have customized extra socket localtion, you set the path using `--extra-socket`.
 
 Now you are all set, requests to gpg agent on remote should be able to forward to your local.
 
@@ -50,3 +50,32 @@ There are several gotchas if not using bridge to forward gpg agent on Windows. S
 
     GnuPG on Windows has not utilized native UDS support yet. It simulates a UDS using a TCP stream socket with
     customized connect step. So without extra tools, you can't really connect openssh-portable to GnuPG.
+
+## Using GnuPG Agent as ssh agent
+
+GnuPG Agent supports OpenSSH Agent protocol. This tool also supports forwarding ssh queries by utilizing putty
+protocols.
+
+1. To forward it as ssh agent, you need to ensure `--enable-putty-support` is configured for gpg client. Or you
+   can put it into the configuration files, `homedir/gpg-agent.conf`. `homedir` can be found by
+   `gpgconf --list-dir homedir`.
+
+    ```
+    enable-putty-support
+    ```
+
+2. Then pass `--ssh \\.\pipe\gpg-bridge-ssh` to gpg-bridge.
+
+    ```
+    ~/.cargo/bin/gpg-bridge --ssh \\.\pipe\gpg-bridge-ssh
+    ```
+
+    This can also be used with extra socket at the same time.
+
+    ```
+    ~/.cargo/bin/gpg-bridge --extra 127.0.0.1:4321 --ssh \\.\pipe\gpg-bridge-ssh
+    ```
+
+3. Now let OpenSSH to use gpg agent by setting environment variable `SSH_AUTH_SOCK` to `\\.\pipe\gpg-bridge-ssh`.
+
+The string "gpg-bridge-ssh" can be changed to anything you want, just make sure it's consistent everywhere.

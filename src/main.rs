@@ -1,12 +1,9 @@
 use clap::{clap_app, crate_description, crate_version};
+use gpg_bridge::other_error;
 use gpg_bridge::SocketType;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::{env, io};
-
-fn other_error(details: String) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, details)
-}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> io::Result<()> {
@@ -16,14 +13,15 @@ async fn main() -> io::Result<()> {
         (version: crate_version!())
         (about: crate_description!())
         (@arg SSH: --ssh [ADDRESS] required_unless[EXTRA] +takes_value "Sets the listenning address to bridge the ssh socket")
-        (@arg SSH_SOCKET: --("ssh-socket") [PATH] +takes_value "Sets the path to gnupg ssh socket optionally")
+        // (@arg SSH_SOCKET: --("ssh-socket") [PATH] +takes_value "Sets the path to gnupg ssh socket optionally")
         (@arg EXTRA: --extra [ADDRESS] required_unless[SSH] +takes_value "Sets the listenning to bridge the extra socket")
         (@arg EXTRA_SOCKET: --("extra-socket") [PATH] +takes_value "Sets the path to gnupg extra socket optionaly")
         (@arg DETACH: --detach "Runs the program as a background daemon")
     ).get_matches();
     let ssh_bridge = matches.value_of("SSH").map(|addr| {
-        let socket = matches.value_of("SSH_SOCKET").map(|s| s.to_string());
-        (addr.to_owned(), socket)
+        // let socket = matches.value_of("SSH_SOCKET").map(|s| s.to_string());
+        // (addr.to_owned(), socket)
+        (addr.to_owned(), None)
     });
     let extra_bridge = matches.value_of("EXTRA").map(|addr| {
         let socket = matches.value_of("EXTRA_SOCKET").map(|s| s.to_string());
