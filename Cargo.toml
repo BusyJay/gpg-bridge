@@ -12,4 +12,7 @@ pretty_env_logger = "0.4"
 parking_lot = "0.11"
 clap = "2.0"
 futures = "0.3"
-winapi = { version = "0.3", features = ["memoryapi", "winuser"] }
+windows = "0.17"
+
+[build-dependencies]
+windows = "0.17"

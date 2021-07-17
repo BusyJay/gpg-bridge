@@ -1,5 +1,15 @@
 // Refer https://github.com/gpg/gnupg/blob/master/agent/gpg-agent.c#L2528
 
+use crate::bindings::Windows::Win32::Foundation::{
+    CloseHandle, HANDLE, INVALID_HANDLE_VALUE, LPARAM, WPARAM,
+};
+use crate::bindings::Windows::Win32::System::DataExchange::COPYDATASTRUCT;
+use crate::bindings::Windows::Win32::System::Memory::{
+    CreateFileMappingA, MapViewOfFile, UnmapViewOfFile, FILE_MAP_ALL_ACCESS, PAGE_READWRITE,
+};
+use crate::bindings::Windows::Win32::UI::WindowsAndMessaging::{
+    FindWindowA, SendMessageA, WM_COPYDATA,
+};
 use crate::util::other_error;
 use core::slice;
 use log::trace;
@@ -11,23 +21,9 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
 use tokio::sync::Semaphore;
 use tokio::sync::SemaphorePermit;
-use winapi::shared::basetsd::ULONG_PTR;
-use winapi::shared::minwindef::LPARAM;
-use winapi::um::handleapi::CloseHandle;
-use winapi::um::handleapi::INVALID_HANDLE_VALUE;
-use winapi::um::memoryapi::MapViewOfFile;
-use winapi::um::memoryapi::UnmapViewOfFile;
-use winapi::um::memoryapi::FILE_MAP_ALL_ACCESS;
-use winapi::um::winbase::CreateFileMappingA;
-use winapi::um::winnt::HANDLE;
-use winapi::um::winnt::PAGE_READWRITE;
-use winapi::um::winuser::FindWindowA;
-use winapi::um::winuser::SendMessageA;
-use winapi::um::winuser::COPYDATASTRUCT;
-use winapi::um::winuser::WM_COPYDATA;
 
 /// A magic value used with WM_COPYDATA.
-const PUTTY_IPC_MAGIC: ULONG_PTR = 0x804e50ba;
+const PUTTY_IPC_MAGIC: usize = 0x804e50ba;
 static FILE_MAP_NAME: &str = "gpg_bridge";
 static PAGEANT_WINDOW_NAME: &str = "Pageant\0";
 
@@ -62,7 +58,7 @@ pub struct Handler {
     view: *mut u8,
     limit: usize,
     mask: u8,
-    name: Vec<u8>,
+    name: String,
     _permit: SemaphorePermit<'static>,
     received: usize,
     replied: usize,
@@ -74,7 +70,7 @@ impl Handler {
     pub async fn new() -> io::Result<Handler> {
         let permit = CONCURRENCY.acquire().await.unwrap();
         let mask = find_available_token();
-        let name = format!("{}-{}\0", FILE_MAP_NAME, mask).into_bytes();
+        let name = format!("{}-{}\0", FILE_MAP_NAME, mask);
         let handle = unsafe {
             CreateFileMappingA(
                 INVALID_HANDLE_VALUE,
@@ -82,7 +78,7 @@ impl Handler {
                 PAGE_READWRITE,
                 0,
                 PUTTY_IPC_MAXLEN as u32,
-                name.as_ptr() as _,
+                name.as_str(),
             )
         };
         if handle.is_null() {
@@ -136,12 +132,7 @@ impl Handler {
         let req = unsafe { slice::from_raw_parts_mut(self.view.add(4), len - 4) };
         reader.read_exact(req).await?;
         trace!("recv request {:?}", String::from_utf8_lossy(req));
-        let win = unsafe {
-            FindWindowA(
-                PAGEANT_WINDOW_NAME.as_ptr() as _,
-                PAGEANT_WINDOW_NAME.as_ptr() as _,
-            )
-        };
+        let win = unsafe { FindWindowA(PAGEANT_WINDOW_NAME, PAGEANT_WINDOW_NAME) };
         if win.is_null() {
             return Err(other_error(format!(
                 "can't contact gpg agent: {}",
@@ -153,8 +144,15 @@ impl Handler {
             cbData: self.name.len() as u32,
             lpData: self.name.as_mut_ptr() as *mut c_void,
         };
-        let res = unsafe { SendMessageA(win, WM_COPYDATA, 0, (&copy_data) as *const _ as LPARAM) };
-        if res == 0 {
+        let res = unsafe {
+            SendMessageA(
+                win,
+                WM_COPYDATA,
+                WPARAM::NULL,
+                LPARAM((&copy_data) as *const _ as _),
+            )
+        };
+        if res.is_null() {
             return Err(other_error(format!(
                 "failed to send message: {}",
                 Error::last_os_error()
