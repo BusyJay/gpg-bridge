@@ -33,7 +33,11 @@ async fn main() -> io::Result<()> {
 
         let mut args = env::args();
         let mut cmd = Command::new(args.next().unwrap());
-        cmd.args(args);
+        for arg in args {
+            if arg != "--detach" {
+                cmd.arg(arg);
+            }
+        }
         return cmd
             .creation_flags(0x0000_0200 | 0x0000_0008 | 0x0400_0000)
             .spawn()
