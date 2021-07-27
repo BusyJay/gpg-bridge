@@ -9,6 +9,11 @@ A bridge connects openssh-portable and GnuPG on Windows.
     cargo install -f --git https://github.com/busyjay/gpg-bridge
     ```
 
+    It's recommanded to build the binary yourself. In case you don't want to setup Rust environment,
+    you can also download a prebuilt binary from github action artifact. [Here][1] is an official guide
+    on how to download artifacts. The artifact is packaged for every commit, make sure download the
+    latest one.
+
 2. Make sure you have setup gpg agent forward following [the guide](https://wiki.gnupg.org/AgentForwarding).
 
 3. Directly using socket provided by GnuPG won't work on Windows, so change local socket to a TCP port instead.
@@ -79,3 +84,5 @@ protocols.
 3. Now let OpenSSH to use gpg agent by setting environment variable `SSH_AUTH_SOCK` to `\\.\pipe\gpg-bridge-ssh`.
 
 The string "gpg-bridge-ssh" can be changed to anything you want, just make sure it's consistent everywhere.
+
+[1]: https://docs.github.com/en/actions/managing-workflow-runs/downloading-workflow-artifacts
