@@ -1,18 +1,40 @@
 [package]
 name = "gpg-bridge"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Jay Lee <busyjaylee@gmail.com>"]
-edition = "2018"
+edition = "2021"
 description = "A bridge connects openssh-portable and GnuPG on Windows."
 
 [dependencies]
 log = "0.4"
-tokio = { version = "1.8", features = ["net", "sync", "parking_lot", "rt", "io-util", "macros", "process", "fs"] }
 pretty_env_logger = "0.4"
-parking_lot = "0.11"
+parking_lot = "0.12"
 clap = "2.0"
 futures = "0.3"
-windows = "0.17"
+
+[dependencies.tokio]
+version = "1.29"
+features = [
+    "net",
+    "sync",
+    "parking_lot",
+    "rt",
+    "io-util",
+    "macros",
+    "process",
+    "fs",
+]
+
+[dependencies.windows]
+version = "0.48"
+features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_UI_WindowsAndMessaging",
+]
+
 
 [build-dependencies]
-windows = "0.17"
+windows = "0.48"

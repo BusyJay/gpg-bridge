@@ -1,10 +1,6 @@
 mod ssh;
 mod util;
 
-mod bindings {
-    windows::include_bindings!();
-}
-
 pub use self::util::other_error;
 use crate::util::{Listener, NamedPipeServerListener, SplitStream};
 use log::{debug, error, trace};
