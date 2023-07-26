@@ -83,11 +83,11 @@ impl Handler {
 
         let handle = match handle {
             Ok(handle) => handle,
-            Err(_e) => {
+            Err(e) => {
                 release_token(mask);
                 return Err(other_error(format!(
                     "failed to create file mapping: {}",
-                    Error::last_os_error()
+                    e
                 )));
             }
         };
@@ -96,14 +96,14 @@ impl Handler {
 
         let view = match view {
             Ok(view) => view,
-            Err(_e) => {
+            Err(e) => {
                 unsafe {
                     CloseHandle(handle);
                 }
                 release_token(mask);
                 return Err(other_error(format!(
                     "failed to map view of file: {}",
-                    Error::last_os_error()
+                    e
                 )));
             }
         };
