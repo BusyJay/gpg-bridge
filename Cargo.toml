@@ -10,6 +10,6 @@ log = "0.4"
 tokio = { version = "1.8", features = ["net", "sync", "parking_lot", "rt", "io-util", "macros", "process", "fs"] }
 pretty_env_logger = "0.4"
 parking_lot = "0.12"
-clap = "2.0"
+clap = { version = "4.0", features = ["derive"] }
 futures = "0.3"
 windows = { version = "0.52", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Memory", "Win32_System_DataExchange", "Win32_UI_WindowsAndMessaging"] }

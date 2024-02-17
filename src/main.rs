@@ -1,34 +1,33 @@
-use clap::{clap_app, crate_description, crate_version};
+use clap::Parser;
 use gpg_bridge::other_error;
 use gpg_bridge::SocketType;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::{env, io};
 
+#[derive(Parser)]
+#[command(name = "gpg-bridge")]
+#[command(version, about)]
+struct GpgBridge {
+    /// Sets the listenning address to bridge the ssh socket
+    #[arg(long, value_name("ADDRESS"), required_unless_present("extra"))]
+    ssh: Option<String>,
+    /// Sets the listenning to bridge the extra socket
+    #[arg(long, value_name("ADDRESS"), required_unless_present("ssh"))]
+    extra: Option<String>,
+    /// Sets the path to gnupg extra socket optionaly
+    #[arg(long, value_name("PATH"))]
+    extra_socket: Option<String>,
+    /// Runs the program as a background daemon
+    #[arg(long)]
+    detach: bool,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> io::Result<()> {
     pretty_env_logger::init();
-
-    let matches = clap_app!(("gpg-bridge") =>
-        (version: crate_version!())
-        (about: crate_description!())
-        (@arg SSH: --ssh [ADDRESS] required_unless[EXTRA] +takes_value "Sets the listenning address to bridge the ssh socket")
-        // (@arg SSH_SOCKET: --("ssh-socket") [PATH] +takes_value "Sets the path to gnupg ssh socket optionally")
-        (@arg EXTRA: --extra [ADDRESS] required_unless[SSH] +takes_value "Sets the listenning to bridge the extra socket")
-        (@arg EXTRA_SOCKET: --("extra-socket") [PATH] +takes_value "Sets the path to gnupg extra socket optionaly")
-        (@arg DETACH: --detach "Runs the program as a background daemon")
-    ).get_matches();
-    let ssh_bridge = matches.value_of("SSH").map(|addr| {
-        // let socket = matches.value_of("SSH_SOCKET").map(|s| s.to_string());
-        // (addr.to_owned(), socket)
-        (addr.to_owned(), None)
-    });
-    let extra_bridge = matches.value_of("EXTRA").map(|addr| {
-        let socket = matches.value_of("EXTRA_SOCKET").map(|s| s.to_string());
-        (addr.to_owned(), socket)
-    });
-    let detach = matches.is_present("DETACH");
-    if detach {
+    let cfg = GpgBridge::parse();
+    if cfg.detach {
         let _ = gpg_bridge::ping_gpg_agent().await;
 
         let mut args = env::args();
@@ -44,15 +43,17 @@ async fn main() -> io::Result<()> {
             .map(|_| ());
     }
 
+    let ssh_from = cfg.ssh;
     let ssh_task = async move {
-        if let Some((addr, socket)) = ssh_bridge {
-            return gpg_bridge::bridge(SocketType::Ssh, addr, socket).await;
+        if let Some(from_addr) = ssh_from {
+            return gpg_bridge::bridge(SocketType::Ssh, from_addr, None).await;
         }
         Ok(())
     };
+    let (extra_from, extra_to) = (cfg.extra, cfg.extra_socket);
     let extra_task = async move {
-        if let Some((addr, socket)) = extra_bridge {
-            return gpg_bridge::bridge(SocketType::Extra, addr, socket).await;
+        if let Some(from_addr) = extra_from {
+            return gpg_bridge::bridge(SocketType::Extra, from_addr, extra_to).await;
         }
         Ok(())
     };
