@@ -1,15 +1,5 @@
 // Refer https://github.com/gpg/gnupg/blob/master/agent/gpg-agent.c#L2528
 
-use crate::bindings::Windows::Win32::Foundation::{
-    CloseHandle, HANDLE, INVALID_HANDLE_VALUE, LPARAM, WPARAM,
-};
-use crate::bindings::Windows::Win32::System::DataExchange::COPYDATASTRUCT;
-use crate::bindings::Windows::Win32::System::Memory::{
-    CreateFileMappingA, MapViewOfFile, UnmapViewOfFile, FILE_MAP_ALL_ACCESS, PAGE_READWRITE,
-};
-use crate::bindings::Windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowA, SendMessageA, WM_COPYDATA,
-};
 use crate::util::other_error;
 use core::slice;
 use log::trace;
@@ -21,6 +11,14 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
 use tokio::sync::Semaphore;
 use tokio::sync::SemaphorePermit;
+use windows::core::PCSTR;
+use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, LPARAM, WPARAM};
+use windows::Win32::System::DataExchange::COPYDATASTRUCT;
+use windows::Win32::System::Memory::{
+    CreateFileMappingA, MapViewOfFile, UnmapViewOfFile, FILE_MAP_ALL_ACCESS,
+    MEMORY_MAPPED_VIEW_ADDRESS, PAGE_READWRITE,
+};
+use windows::Win32::UI::WindowsAndMessaging::{FindWindowA, SendMessageA, WM_COPYDATA};
 
 /// A magic value used with WM_COPYDATA.
 const PUTTY_IPC_MAGIC: usize = 0x804e50ba;
@@ -55,7 +53,7 @@ fn release_token(mask: u8) {
 
 pub struct Handler {
     handle: HANDLE,
-    view: *mut u8,
+    view: MEMORY_MAPPED_VIEW_ADDRESS,
     limit: usize,
     mask: u8,
     name: String,
@@ -74,31 +72,37 @@ impl Handler {
         let handle = unsafe {
             CreateFileMappingA(
                 INVALID_HANDLE_VALUE,
-                ptr::null_mut(),
+                None,
                 PAGE_READWRITE,
                 0,
                 PUTTY_IPC_MAXLEN as u32,
-                name.as_str(),
+                PCSTR::from_raw(name.as_ptr()),
             )
         };
-        if handle.is_null() {
-            release_token(mask);
-            return Err(other_error(format!(
-                "failed to create memory mapping: {}",
-                Error::last_os_error()
-            )));
-        }
-        let view = unsafe { MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, PUTTY_IPC_MAXLEN) };
-        if view.is_null() {
-            unsafe {
-                CloseHandle(handle);
+        let handle = match handle {
+            Ok(h) => h,
+            Err(e) => {
+                release_token(mask);
+                return Err(other_error(format!(
+                    "failed to create memory mapping: {e:?}"
+                )));
             }
+        };
+        let view = unsafe { MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, PUTTY_IPC_MAXLEN) };
+        if view.Value.is_null() {
+            let res = unsafe { CloseHandle(handle) };
             release_token(mask);
-            return Err(other_error("can't map view of memory".to_string()));
+            if let Err(e) = res {
+                return Err(other_error(format!(
+                    "can't map view of memory and handle can't be closed: {e:?}"
+                )));
+            } else {
+                return Err(other_error("can't map view of memory".to_string()));
+            }
         }
         Ok(Handler {
             handle,
-            view: view as *mut u8,
+            view,
             limit: PUTTY_IPC_MAXLEN,
             mask,
             name,
@@ -112,7 +116,7 @@ impl Handler {
         &mut self,
         reader: &mut Pin<Box<dyn AsyncRead + Send + '_>>,
     ) -> io::Result<Option<&[u8]>> {
-        let len_bytes = unsafe { slice::from_raw_parts_mut(self.view, 4) };
+        let len_bytes = unsafe { slice::from_raw_parts_mut(self.view.Value as *mut u8, 4) };
         if let Err(e) = reader.read_exact(len_bytes).await {
             if e.kind() == ErrorKind::UnexpectedEof {
                 return Ok(None);
@@ -120,7 +124,8 @@ impl Handler {
                 return Err(e);
             }
         }
-        let len = u32::from_be(unsafe { (self.view as *mut u32).read_unaligned() }) as usize + 4;
+        let len =
+            u32::from_be(unsafe { (self.view.Value as *mut u32).read_unaligned() }) as usize + 4;
         if len >= self.limit {
             return Err(other_error(format!(
                 "message too large: {} >= {}",
@@ -129,11 +134,13 @@ impl Handler {
             )));
         }
         self.received += len;
-        let req = unsafe { slice::from_raw_parts_mut(self.view.add(4), len - 4) };
+        let req =
+            unsafe { slice::from_raw_parts_mut((self.view.Value as *mut u8).add(4), len - 4) };
         reader.read_exact(req).await?;
         trace!("recv request {:?}", String::from_utf8_lossy(req));
-        let win = unsafe { FindWindowA(PAGEANT_WINDOW_NAME, PAGEANT_WINDOW_NAME) };
-        if win.is_null() {
+        let pageant_window_name = PCSTR::from_raw(PAGEANT_WINDOW_NAME.as_ptr());
+        let win = unsafe { FindWindowA(pageant_window_name, pageant_window_name) };
+        if win.0 == 0 {
             return Err(other_error(format!(
                 "can't contact gpg agent: {}",
                 Error::last_os_error()
@@ -148,18 +155,19 @@ impl Handler {
             SendMessageA(
                 win,
                 WM_COPYDATA,
-                WPARAM::NULL,
+                WPARAM::default(),
                 LPARAM((&copy_data) as *const _ as _),
             )
         };
-        if res.is_null() {
+        if res.0 == 0 {
             return Err(other_error(format!(
                 "failed to send message: {}",
                 Error::last_os_error()
             )));
         }
 
-        let len = u32::from_be(unsafe { (self.view as *mut u32).read_unaligned() }) as usize + 4;
+        let len =
+            u32::from_be(unsafe { (self.view.Value as *mut u32).read_unaligned() }) as usize + 4;
         if len > self.limit {
             return Err(other_error(format!(
                 "response too large: {} > {}",
@@ -168,7 +176,12 @@ impl Handler {
             )));
         }
         self.replied += len;
-        unsafe { Ok(Some(slice::from_raw_parts(self.view, len))) }
+        unsafe {
+            Ok(Some(slice::from_raw_parts(
+                self.view.Value as *const u8,
+                len,
+            )))
+        }
     }
 
     pub fn received(&self) -> usize {
@@ -183,11 +196,9 @@ impl Handler {
 impl Drop for Handler {
     fn drop(&mut self) {
         unsafe {
-            ptr::write_bytes(self.view, 0, self.limit);
-            if !self.view.is_null() {
-                UnmapViewOfFile(self.view as *mut c_void);
-            }
-            CloseHandle(self.handle);
+            ptr::write_bytes(self.view.Value as *mut u8, 0, self.limit);
+            let _ = UnmapViewOfFile(self.view);
+            let _ = CloseHandle(self.handle);
         }
         release_token(self.mask);
     }
