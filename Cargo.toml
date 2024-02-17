@@ -1,6 +1,6 @@
 [package]
 name = "gpg-bridge"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Jay Lee <busyjaylee@gmail.com>"]
 edition = "2018"
 description = "A bridge connects openssh-portable and GnuPG on Windows."

@@ -7,13 +7,14 @@ use log::{debug, error, trace};
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{error, io, mem, ptr, str};
 use tokio::fs::File;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::windows::named_pipe::ServerOptions;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
+use tokio::sync::Mutex;
 
 struct AgentMeta {
     path: Option<String>,
@@ -93,7 +94,7 @@ fn load_cygwin_port_nounce(buffer: &[u8]) -> io::Result<(u16, [u8; 16])> {
         Err(e) => Err(report_data_err(e)),
     };
 
-    let end_pos = find(&buffer, 0, b' ')?;
+    let end_pos = find(buffer, 0, b' ')?;
     let port = parse(&buffer[..end_pos], 10)?;
 
     if (1..=65535).contains(&port)
@@ -124,7 +125,7 @@ async fn load_port_nounce(path: &str) -> io::Result<(u16, [u8; 16])> {
     if !Path::new(&path).exists() {
         ping_gpg_agent().await?;
     }
-    let mut f = File::open(&path.replace("\\", "/")).await?;
+    let mut f = File::open(&path.replace('\\', "/")).await?;
     let mut buffer = Vec::with_capacity(50);
     f.read_to_end(&mut buffer).await?;
     if buffer.starts_with(b"!<socket >") {
@@ -237,7 +238,7 @@ where
 
         let meta = meta.clone();
         let (port, nounce) = {
-            let mut m = meta.lock().unwrap();
+            let mut m = meta.lock().await;
             if m.args.is_none() {
                 if m.path.is_none() {
                     m.path = Some(load_gpg_socket_path(SocketType::Extra).await?);
@@ -250,7 +251,7 @@ where
         tokio::spawn(async move {
             if let Err(e) = delegate(conn, port, nounce).await {
                 error!("failed to delegate stream: {:?}", e);
-                meta.lock().unwrap().args.take();
+                meta.lock().await.args.take();
             }
         });
     }
